@@ -1,0 +1,190 @@
+TASK: Analyze my Obsidian vault and create a Relationships.md file that makes implicit connections explicit for AI assistants.
+
+CONTEXT:
+I'm conducting a job search with these critical constraints:
+- Employment deadline: March 2026 (3 months remaining)
+- Visa: OPT expires July 2026, need H1B sponsorship
+- Target: Solutions Engineer, Implementation Consultant roles ($90-100K)
+- Positioning: Enterprise SaaS implementation + AI security bridge
+- Background: 4 years HighRadius (Fortune 500 clients), Cybersecurity M.Eng
+- Work style: NOT heavy coder - system design, AI automation, orchestration
+
+VAULT STRUCTURE YOU'RE ANALYZING:
+Job/
+├── README For AI.md (master guide, timeline, success metrics)
+├── Identity/
+│   ├── Identity.md (positioning, target roles, compensation)
+│   └── Linkedin/ (content strategy)
+├── Career-History/ (work experience, stories, accomplishments)
+├── Master Resume/ (source content)
+├── Upskill/ (learning resources, DevSecOps Pro)
+├── Apply/ (application tracking)
+└── Outreach/ (networking strategy)
+
+Projects/
+├── Personal/ (Claude Code, Local LLM Browser Automation, OAuth work)
+├── Professional/
+└── Projects.md (describes AI-powered workflows, system design work)
+
+YOUR GOAL:
+Create relationship mappings for these specific AI assistant use cases:
+
+---
+
+## USE CASE 1: Learning/Skill Development Decisions
+
+TRIGGER PHRASES: "Should I learn X?", "Is X worth learning?", "What should I focus on?"
+
+EXAMPLE QUERY: "Should I learn LangChain/LangGraph?"
+
+PULL CONTEXT FROM:
+- Job/README For AI.md → [Extract: March 2026 deadline, H1B requirement]
+- Job/Identity/Identity.md → [Extract: Target roles (SE, Implementation), positioning strategy, what I want to be known for]
+- Projects/Projects.md → [Extract: Current work (AI automation, OAuth), NOT heavy coder, uses AI tools]
+- Projects/Personal/ → [Extract: Specific projects like Local LLM Browser Automation, Claude Code]
+- Job/Upskill/ → [Extract: Current learning priorities, gaps]
+- Job/Identity/Linkedin/ → [Extract: Content strategy if available]
+
+RELATIONSHIPS TO MAKE EXPLICIT:
+- New skill SUPPORTS positioning as "Enterprise SaaS + AI security bridge"
+- New skill DEMONSTRATES technical credibility (Identity requirement)
+- Learning MUST COMPLETE by January 2026 (interview prep timeline)
+- Skill CREATES LinkedIn content opportunity (technical depth posts)
+- Current projects INFORM next logical skill to learn (progression path)
+- Portfolio REQUIRES demonstrable project using new skill
+- Target roles REQUIRE specific technical capabilities (match to JDs)
+
+OUTPUT FORMAT FOR THIS USE CASE:
+```markdown
+## Learning & Skill Development Decisions
+
+TRIGGER: User asks about learning new technologies, skills, or frameworks
+
+RELEVANT CONTEXT:
+Job Timeline: March 2026 employment deadline (Job/README For AI.md)
+Positioning: Enterprise SaaS + AI security bridge (Job/Identity/Identity.md)
+Current Technical Work: {list from Projects/}
+Target Roles: Solutions Engineer, Implementation Consultant (Job/Identity/Identity.md)
+Learning Constraints: {from Job/Upskill/}
+Content Strategy: {from Job/Identity/Linkedin/ if exists}
+
+RELATIONSHIP CHAIN:
+New Skill → Demonstrates → Technical Credibility → Required By → Positioning Strategy
+New Skill → Builds On → Current Projects → Shows → Progression
+New Skill → Enables → Portfolio Project → Needed For → Interviews (Jan 2026)
+New Skill → Creates → LinkedIn Content → Supports → Personal Brand
+Learning Timeline → Constrained By → March 2026 Deadline
+
+ANSWER STRUCTURE:
+1. YES/NO with confidence level
+2. How it supports positioning strategy
+3. How it builds on current work (Projects/)
+4. Timeline fit (completion by Jan 2026?)
+5. Portfolio/interview value
+6. LinkedIn content opportunity
+7. Specific action plan with dates
+```
+
+---
+
+## USE CASE 2: LinkedIn Content Creation
+
+TRIGGER PHRASES: "Write a LinkedIn post", "Help me post about X", "LinkedIn content"
+
+PULL CONTEXT FROM:
+- Job/Identity/Linkedin/ → [Content strategy, past posts if available]
+- Job/Identity/Identity.md → [Positioning: "technical depth, not generic"]
+- Projects/ → [Recent work to showcase]
+- Job/Upskill/ → [Learning journeys to document]
+- Job/README For AI.md → [Strategic goals: visibility, positioning]
+
+RELATIONSHIPS TO MAKE EXPLICIT:
+- LinkedIn content SUPPORTS job search visibility goal
+- Posts MUST ALIGN with positioning strategy (technical + business bridge)
+- Content DRAWS FROM recent Projects/ work (authenticity)
+- Posts AVOID generic career advice (Identity requirement)
+- Learning journeys CREATE content opportunities
+- Content REINFORCES "Enterprise SaaS + AI security" niche
+
+---
+
+## USE CASE 3: Project Selection & Prioritization
+
+TRIGGER PHRASES: "Should I build X?", "What project should I work on?", "Is this project worth it?"
+
+PULL CONTEXT FROM:
+- Job/Identity/Identity.md → [Portfolio needs, what to be known for]
+- Projects/Projects.md → [Current work, style: NOT heavy coding]
+- Job/README For AI.md → [Timeline: before interview stage]
+- Job/Upskill/ → [Skill gaps to address]
+
+RELATIONSHIPS TO MAKE EXPLICIT:
+- Projects MUST DEMONSTRATE skills for target roles
+- Projects SHOULD BUILD ON existing work (OAuth, AI automation)
+- Projects NEED COMPLETION by January 2026 (interview timeline)
+- Projects CREATE LinkedIn content + interview stories
+- Project complexity MATCHES work style (AI tools, orchestration, not heavy coding)
+- Portfolio ADDRESSES positioning strategy (Enterprise + AI security)
+
+---
+
+## USE CASE 4: Job Application Strategy
+
+TRIGGER PHRASES: "Should I apply to X?", "Is this company a good fit?", "Tailor my resume for Y"
+
+PULL CONTEXT FROM:
+- Job/Identity/Identity.md → [Target company profile, compensation floor]
+- Job/README For AI.md → [H1B sponsorship requirement, timeline]
+- Job/Career-History/ → [Experience to highlight]
+- Projects/ → [Portfolio to reference]
+- Job/Master Resume/ → [Content to customize]
+
+RELATIONSHIPS TO MAKE EXPLICIT:
+- Company MUST SPONSOR H1B (non-negotiable constraint)
+- Role MUST FIT target profiles (SE, Implementation Consultant)
+- Compensation MUST MEET $70K floor
+- Application LEVERAGES Career-History stories
+- Resume HIGHLIGHTS relevant Projects
+- Timeline REQUIRES offer by March 2026
+
+---
+
+CRITICAL RELATIONSHIPS TO CAPTURE:
+
+1. MARCH 2026 DEADLINE impacts:
+   - All learning must complete by Jan 2026
+   - Portfolio projects need demonstration timeline
+   - LinkedIn content creation urgency
+   - Application volume requirements
+
+2. H1B SPONSORSHIP impacts:
+   - Company selection criteria
+   - Compensation negotiation constraints
+   - Application filtering priorities
+
+3. POSITIONING STRATEGY ("Enterprise SaaS + AI security bridge") impacts:
+   - Skill selection priorities
+   - Project selection criteria
+   - LinkedIn content themes
+   - Resume customization angle
+
+4. WORK STYLE (AI tools, orchestration, NOT heavy coding) impacts:
+   - Project complexity decisions
+   - Skill learning priorities (LangChain vs low-level implementation)
+   - Role fit assessment
+
+5. CURRENT PROJECTS (OAuth, AI automation) impact:
+   - Next logical skill progression
+   - Portfolio narrative (showing progression)
+   - LinkedIn content authenticity
+
+OUTPUT REQUIREMENTS:
+- Use clear markdown headers for each use case
+- List specific file paths (Job/Identity/Identity.md, not just "identity notes")
+- Make relationship chains explicit with arrows (→)
+- Include timeline constraints in EVERY relevant section
+- Specify WHY relationships matter (not just THAT they exist)
+- Use WHEN/PULL/RELATIONSHIPS structure consistently
+- Focus on ACTIONABLE connections that help AI give personalized advice
+
+Create the complete Relationships.md file now.
