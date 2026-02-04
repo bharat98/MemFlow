@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "memflow": {
+      "command": "python",
+      "args": ["C:/Users/gurba/Documents/Second Brain/Projects/Personal/MemFlow/src/mcp_server.py"],
+      "env": {
+        "VAULT_PATH": "C:/Users/gurba/Documents/Second Brain",
+        "INDEX_STORAGE": "C:/Users/gurba/Documents/Second Brain/Projects/Personal/MemFlow/src/.memflow_index",
+        "MCP_PORT": "8080",
+        "ENABLE_FILE_WATCHER": "true"
+      }
+    }
+  }
+}
