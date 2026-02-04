@@ -332,15 +332,18 @@ def main():
     parser.add_argument("--host", default=HOST, help="Host to bind to")
     parser.add_argument("--port", type=int, default=PORT, help="Port to listen on")
     parser.add_argument("--no-watcher", action="store_true", help="Disable file watcher")
-    parser.add_argument("--vault", default=VAULT_PATH, help="Path to Obsidian vault")
+    parser.add_argument("--vault", default=None, help="Path to Obsidian vault")
 
     args = parser.parse_args()
 
-    global ENABLE_FILE_WATCHER, VAULT_PATH
-    if args.no_watcher:
-        ENABLE_FILE_WATCHER = False
+    # Update environment if vault path provided
     if args.vault:
         os.environ["VAULT_PATH"] = args.vault
+
+    # Update global for file watcher setting
+    global ENABLE_FILE_WATCHER
+    if args.no_watcher:
+        ENABLE_FILE_WATCHER = False
 
     uvicorn.run(
         app,
