@@ -18,7 +18,16 @@ from datetime import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
-from index_vault import load_index, update_documents, VAULT_PATH, INDEX_STORAGE
+from index_vault import (
+    load_index,
+    update_documents,
+    VAULT_PATH,
+    INDEX_STORAGE,
+    build_exclude_paths,
+    is_excluded_path,
+    get_memflow_config,
+    is_included_path,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +53,8 @@ class VaultWatcher(FileSystemEventHandler):
         self.pending_changes: Set[str] = set()
         self.last_change_time: float = 0
         self.index = None
+        self.exclude_paths = build_exclude_paths(Path(vault_path))
+        self.config = get_memflow_config()
         self._lock = threading.Lock()
         self._running = False
         self._process_thread: Optional[threading.Thread] = None
@@ -86,8 +97,10 @@ class VaultWatcher(FileSystemEventHandler):
         if any(part.startswith('.') for part in path_obj.parts):
             return False
 
-        # Ignore index storage directory
-        if INDEX_STORAGE in path:
+        # Ignore excluded paths
+        if is_excluded_path(path_obj, Path(self.vault_path), self.exclude_paths):
+            return False
+        if not is_included_path(path_obj, Path(self.vault_path), self.config):
             return False
 
         return True

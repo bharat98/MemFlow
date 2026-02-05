@@ -1,0 +1,5 @@
+{
+  "include_dirs": ["FolderA", "FolderB"],
+  "include_files": [],
+  "exclude_dirs": []
+}

@@ -9,6 +9,11 @@ Implements hybrid retrieval combining:
 """
 
 import os
+
+# Ensure HuggingFace runs offline in restricted environments
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import re
 import logging
 from pathlib import Path
@@ -19,7 +24,16 @@ from datetime import datetime
 from llama_index.core import VectorStoreIndex, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-from index_vault import load_index, VAULT_PATH, INDEX_STORAGE, EMBEDDING_MODEL
+from index_vault import (
+    load_index,
+    VAULT_PATH,
+    INDEX_STORAGE,
+    EMBEDDING_MODEL,
+    build_exclude_paths,
+    get_memflow_config,
+    is_excluded_path,
+    is_included_path,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -28,8 +42,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Relationship retrieval limits (tune via env vars)
+RELATIONSHIP_DIR_LIMIT = int(os.environ.get("RELATIONSHIP_DIR_LIMIT", "0"))
+RELATIONSHIP_TOTAL_LIMIT = int(os.environ.get("RELATIONSHIP_TOTAL_LIMIT", "0"))
+MEMFLOW_PROFILE = os.environ.get("MEMFLOW_PROFILE", "false").lower() == "true"
+
 # Path to Relationships.md
-RELATIONSHIPS_PATH = os.path.join(VAULT_PATH, "Projects", "Personal", "MemFlow", "Relationships.md")
+DEFAULT_RELATIONSHIPS_PATH = os.environ.get(
+    "RELATIONSHIPS_PATH",
+    os.path.join(VAULT_PATH, "Relationships.md"),
+)
+LEGACY_RELATIONSHIPS_PATH = os.path.join(
+    VAULT_PATH, "Projects", "Personal", "MemFlow", "Relationships.md"
+)
+RELATIONSHIPS_PATH = DEFAULT_RELATIONSHIPS_PATH
 
 
 @dataclass
@@ -57,7 +83,23 @@ class RelationshipParser:
     def __init__(self, relationships_path: str = RELATIONSHIPS_PATH):
         self.relationships_path = relationships_path
         self.use_cases: List[UseCase] = []
+        self._resolve_relationships_path()
         self._parse()
+
+    def _resolve_relationships_path(self) -> None:
+        """Resolve Relationships.md path with a legacy fallback."""
+        if os.path.exists(self.relationships_path):
+            return
+
+        if (
+            self.relationships_path == DEFAULT_RELATIONSHIPS_PATH
+            and os.path.exists(LEGACY_RELATIONSHIPS_PATH)
+        ):
+            logger.info(
+                f"Relationships.md not found at vault root. "
+                f"Falling back to legacy path: {LEGACY_RELATIONSHIPS_PATH}"
+            )
+            self.relationships_path = LEGACY_RELATIONSHIPS_PATH
 
     def _parse(self) -> None:
         """Parse the Relationships.md file to extract use cases."""
@@ -146,10 +188,10 @@ class RelationshipParser:
         query_lower = query.lower()
 
         # Define trigger patterns for each use case type
-        learning_triggers = ['learn', 'should i', 'worth it', 'skill', 'technology', 'framework', 'course']
         linkedin_triggers = ['linkedin', 'post', 'content', 'write a', 'publish']
-        project_triggers = ['build', 'project', 'what should i', 'prioritize', 'next project']
-        job_triggers = ['apply', 'job', 'company', 'resume', 'application', 'fit', 'role']
+        job_triggers = ['apply', 'job', 'company', 'resume', 'application', 'fit', 'role', 'sponsor', 'visa']
+        project_triggers = ['build', 'project', 'what should i', 'prioritize', 'next project', 'work on']
+        learning_triggers = ['learn', 'learning', 'skill', 'technology', 'framework', 'course', 'cert']
 
         for use_case in self.use_cases:
             # Check explicit triggers
@@ -157,15 +199,15 @@ class RelationshipParser:
                 if trigger.lower() in query_lower:
                     return use_case
 
-        # Check category-based matching
-        if any(t in query_lower for t in learning_triggers):
-            for uc in self.use_cases:
-                if 'Learning' in uc.name or 'Skill' in uc.name:
-                    return uc
-
+        # Check category-based matching (order matters)
         if any(t in query_lower for t in linkedin_triggers):
             for uc in self.use_cases:
                 if 'LinkedIn' in uc.name or 'Content' in uc.name:
+                    return uc
+
+        if any(t in query_lower for t in job_triggers):
+            for uc in self.use_cases:
+                if 'Job' in uc.name or 'Application' in uc.name:
                     return uc
 
         if any(t in query_lower for t in project_triggers):
@@ -173,9 +215,9 @@ class RelationshipParser:
                 if 'Project' in uc.name:
                     return uc
 
-        if any(t in query_lower for t in job_triggers):
+        if any(t in query_lower for t in learning_triggers):
             for uc in self.use_cases:
-                if 'Job' in uc.name or 'Application' in uc.name:
+                if 'Learning' in uc.name or 'Skill' in uc.name:
                     return uc
 
         return None
@@ -193,6 +235,10 @@ class MemFlowQueryEngine:
             raise ValueError("No index available. Run index_vault.py first.")
 
         self.relationship_parser = RelationshipParser()
+        self._file_cache: Dict[str, Dict[str, Any]] = {}
+        self._relationship_cache: Dict[str, List[Tuple[str, float, Dict]]] = {}
+        self._config = get_memflow_config()
+        self._exclude_paths = build_exclude_paths(Path(VAULT_PATH))
 
         # Configure embedding model
         embed_model = HuggingFaceEmbedding(
@@ -201,6 +247,67 @@ class MemFlowQueryEngine:
         )
         Settings.embed_model = embed_model
         Settings.llm = None
+
+        # Warm up embedding model and retriever to reduce first-query latency
+        self._warmup()
+
+    def _warmup(self) -> None:
+        """Warm up the retriever to avoid cold-start latency."""
+        try:
+            retriever = self.index.as_retriever(similarity_top_k=1)
+            _ = retriever.retrieve("warmup")
+        except Exception as e:
+            logger.debug(f"Warmup failed: {e}")
+
+    def _read_file_cached(self, file_path: Path) -> Optional[str]:
+        """Read a file with simple mtime-based caching."""
+        key = str(file_path)
+        try:
+            mtime = file_path.stat().st_mtime
+        except Exception:
+            return None
+
+        cached = self._file_cache.get(key)
+        if cached and cached.get("mtime") == mtime:
+            return cached.get("content")
+
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except Exception as e:
+            logger.debug(f"Error reading {file_path}: {e}")
+            return None
+
+        self._file_cache[key] = {"content": content, "mtime": mtime}
+        return content
+
+    def _iter_markdown_files(self, root: Path) -> List[Path]:
+        """Iterate markdown files under root, pruning excluded paths early."""
+        md_files: List[Path] = []
+        vault_path = Path(VAULT_PATH)
+
+        for dirpath, dirnames, filenames in os.walk(root):
+            dir_path = Path(dirpath)
+
+            # Prune excluded directories in-place
+            kept_dirs = []
+            for d in dirnames:
+                candidate = dir_path / d
+                if is_excluded_path(candidate, vault_path, self._exclude_paths):
+                    continue
+                kept_dirs.append(d)
+            dirnames[:] = kept_dirs
+
+            for filename in filenames:
+                if not filename.endswith(".md"):
+                    continue
+                file_path = dir_path / filename
+                if is_excluded_path(file_path, vault_path, self._exclude_paths):
+                    continue
+                if not is_included_path(file_path, vault_path, self._config):
+                    continue
+                md_files.append(file_path)
+
+        return md_files
 
     def _vector_search(self, query: str, top_k: int = 5) -> List[Tuple[str, float, Dict]]:
         """
@@ -229,7 +336,13 @@ class MemFlowQueryEngine:
         Returns:
             List of (content, score, metadata) tuples
         """
+        cache_key = use_case.name
+        cached = self._relationship_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         results = []
+        total_added = 0
         vault_path = Path(VAULT_PATH)
 
         for file_pattern in use_case.relevant_files:
@@ -237,33 +350,47 @@ class MemFlowQueryEngine:
             if file_pattern.endswith('/'):
                 search_path = vault_path / file_pattern.rstrip('/')
                 if search_path.exists() and search_path.is_dir():
-                    for md_file in search_path.rglob('*.md'):
-                        try:
-                            content = md_file.read_text(encoding='utf-8')
-                            metadata = {
-                                "file_path": str(md_file),
-                                "file_name": md_file.name,
-                                "source": "relationship",
-                            }
-                            # Higher score for relationship-based matches
-                            results.append((content, 0.8, metadata))
-                        except Exception as e:
-                            logger.debug(f"Error reading {md_file}: {e}")
+                    md_files = self._iter_markdown_files(search_path)
+                    md_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                    if RELATIONSHIP_DIR_LIMIT > 0:
+                        md_files = md_files[:RELATIONSHIP_DIR_LIMIT]
+                    for md_file in md_files:
+                        content = self._read_file_cached(md_file)
+                        if not content:
+                            continue
+                        metadata = {
+                            "file_path": str(md_file),
+                            "file_name": md_file.name,
+                            "source": "relationship",
+                        }
+                        # Higher score for relationship-based matches
+                        results.append((content, 0.8, metadata))
+                        total_added += 1
+                        if RELATIONSHIP_TOTAL_LIMIT > 0 and total_added >= RELATIONSHIP_TOTAL_LIMIT:
+                            break
             else:
                 # Direct file reference
                 file_path = vault_path / file_pattern
                 if file_path.exists():
-                    try:
-                        content = file_path.read_text(encoding='utf-8')
-                        metadata = {
-                            "file_path": str(file_path),
-                            "file_name": file_path.name,
-                            "source": "relationship",
-                        }
-                        results.append((content, 0.9, metadata))
-                    except Exception as e:
-                        logger.debug(f"Error reading {file_path}: {e}")
+                    if is_excluded_path(file_path, vault_path, self._exclude_paths):
+                        continue
+                    if not is_included_path(file_path, vault_path, self._config):
+                        continue
+                    content = self._read_file_cached(file_path)
+                    if not content:
+                        continue
+                    metadata = {
+                        "file_path": str(file_path),
+                        "file_name": file_path.name,
+                        "source": "relationship",
+                    }
+                    results.append((content, 0.9, metadata))
+                    total_added += 1
 
+            if RELATIONSHIP_TOTAL_LIMIT > 0 and total_added >= RELATIONSHIP_TOTAL_LIMIT:
+                break
+
+        self._relationship_cache[cache_key] = results
         return results
 
     def _boost_by_metadata(
@@ -311,6 +438,49 @@ class MemFlowQueryEngine:
         """
         Format retrieved content into structured context.
         """
+        def extract_key_lines(text: str, max_lines: int = 4) -> List[str]:
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            if not lines:
+                return []
+
+            # Prefer structured lines: bullets, numbered items, or key-value style
+            preferred = []
+            for ln in lines[:200]:
+                if ln.startswith(("-", "*")):
+                    preferred.append(ln)
+                elif ln[:2].isdigit() and (")" in ln[:4] or "." in ln[:4]):
+                    preferred.append(ln)
+                elif ":" in ln and len(ln) < 140:
+                    preferred.append(ln)
+
+            # Boost known critical keywords if present
+            keyword_hits = []
+            keywords = [
+                "March 2026",
+                "H1B",
+                "Solutions Engineer",
+                "Implementation",
+                "TAM",
+                "Enterprise SaaS",
+                "AI security",
+                "positioning",
+                "visa",
+                "deadline",
+            ]
+            for ln in lines[:400]:
+                if any(k.lower() in ln.lower() for k in keywords):
+                    keyword_hits.append(ln)
+
+            # Merge with priority: keyword hits, then preferred, then first lines
+            merged = []
+            for ln in keyword_hits + preferred + lines[:10]:
+                if ln not in merged:
+                    merged.append(ln)
+                if len(merged) >= max_lines:
+                    break
+
+            return merged[:max_lines]
+
         # Deduplicate by file path
         seen_files = set()
         unique_results = []
@@ -340,10 +510,12 @@ class MemFlowQueryEngine:
             file_path = metadata.get('file_path', '')
             file_name = metadata.get('file_name', 'Unknown')
 
-            # Extract key information (first 500 chars or until double newline)
-            summary = content[:500].split('\n\n')[0]
-
-            entry = f"- {file_name}: {summary[:200]}..."
+            key_lines = extract_key_lines(content, max_lines=4)
+            if key_lines:
+                entry = f"- {file_name}: " + " | ".join(key_lines[:4])
+            else:
+                summary = content[:500].split('\n\n')[0]
+                entry = f"- {file_name}: {summary[:200]}..."
 
             if 'Job/' in file_path or 'Career' in file_path:
                 job_context.append(entry)
@@ -399,10 +571,13 @@ class MemFlowQueryEngine:
         start_time = time.time()
 
         # 1. Check if query matches a use case
+        t0 = time.time()
         use_case = self.relationship_parser.match_use_case(query)
+        t1 = time.time()
 
         # 2. Perform vector similarity search
         vector_results = self._vector_search(query, top_k=5)
+        t2 = time.time()
 
         # 3. If use case matched, add relationship-guided results
         if use_case:
@@ -411,12 +586,15 @@ class MemFlowQueryEngine:
             all_results = vector_results + relationship_results
         else:
             all_results = vector_results
+        t3 = time.time()
 
         # 4. Boost by metadata
         boosted_results = self._boost_by_metadata(all_results)
+        t4 = time.time()
 
         # 5. Format context
         context = self._format_context(boosted_results, use_case, max_tokens)
+        t5 = time.time()
 
         # 6. Extract sources
         sources = list(set(
@@ -433,6 +611,15 @@ class MemFlowQueryEngine:
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"Query completed in {elapsed_ms:.1f}ms, confidence: {confidence:.2f}")
+        if MEMFLOW_PROFILE:
+            logger.info(
+                "Timing breakdown (ms) - use_case: %.1f, vector: %.1f, relationship: %.1f, boost: %.1f, format: %.1f",
+                (t1 - t0) * 1000,
+                (t2 - t1) * 1000,
+                (t3 - t2) * 1000,
+                (t4 - t3) * 1000,
+                (t5 - t4) * 1000,
+            )
 
         return ContextResult(
             context=context,

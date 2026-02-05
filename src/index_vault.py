@@ -7,10 +7,16 @@ and persists the index for fast retrieval.
 """
 
 import os
+
+# Ensure HuggingFace runs offline in restricted environments
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+import json
 import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 
 import frontmatter
@@ -34,13 +40,177 @@ logger = logging.getLogger(__name__)
 # Configuration
 VAULT_PATH = os.environ.get(
     "VAULT_PATH",
-    "/mnt/c/Users/gurba/Documents/Second Brain"
+    "/path/to/vault"
+)
+MEMFLOW_CONFIG_PATH = os.environ.get(
+    "MEMFLOW_CONFIG_PATH",
+    str(Path(__file__).resolve().parents[1] / "memflow_config.json")
+)
+MEMFLOW_CONFIG_LOCAL_PATH = os.environ.get(
+    "MEMFLOW_CONFIG_PATH_LOCAL",
+    str(Path(MEMFLOW_CONFIG_PATH).with_name("memflow_config.local.json"))
 )
 INDEX_STORAGE = os.environ.get(
     "INDEX_STORAGE",
     os.path.join(os.path.dirname(__file__), ".memflow_index")
 )
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+# Paths to exclude from indexing
+MEMFLOW_ROOT = Path(__file__).resolve().parents[1]
+EXCLUDED_DIR_NAMES: Set[str] = {
+    ".git",
+    ".obsidian",
+    ".trash",
+    ".memflow_index",
+    "venv",
+    ".venv",
+    "__pycache__",
+}
+
+_MEMFLOW_CONFIG: Optional[Dict[str, Any]] = None
+
+
+def _load_config_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            logger.warning(f"MemFlow config must be a JSON object: {path}")
+            return {}
+        logger.info(f"Loaded MemFlow config: {path}")
+        return data
+    except Exception as e:
+        logger.warning(f"Could not read MemFlow config {path}: {e}")
+        return {}
+
+
+def load_memflow_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load MemFlow config JSON if present, with local overrides."""
+    base_path = Path(config_path or MEMFLOW_CONFIG_PATH)
+    config = _load_config_file(base_path)
+
+    local_path_str = os.environ.get("MEMFLOW_CONFIG_PATH_LOCAL")
+    local_path = Path(local_path_str) if local_path_str else Path(MEMFLOW_CONFIG_LOCAL_PATH)
+    local_config = _load_config_file(local_path)
+    if local_config:
+        config.update(local_config)
+
+    return config
+
+
+def get_memflow_config() -> Dict[str, Any]:
+    """Get cached MemFlow config."""
+    global _MEMFLOW_CONFIG
+    if _MEMFLOW_CONFIG is None:
+        _MEMFLOW_CONFIG = load_memflow_config()
+    return _MEMFLOW_CONFIG
+
+
+def _normalize_rel_path(path: Path, vault_path: Path) -> str:
+    return str(path.relative_to(vault_path)).replace(os.sep, "/").lower()
+
+
+def _normalize_path_str(path: str) -> str:
+    return path.replace("\\", "/").lstrip("/").lower()
+
+
+def _normalize_dir_name(name: str) -> str:
+    return name.strip("/\\").lower()
+
+
+def is_included_path(
+    path: Path,
+    vault_path: Path,
+    config: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return True if a path is allowed by MemFlow config."""
+    if not path:
+        return False
+
+    config = config or get_memflow_config()
+    include_dirs = [_normalize_dir_name(d) for d in config.get("include_dirs", []) if d]
+    include_files = [_normalize_path_str(f) for f in config.get("include_files", []) if f]
+    exclude_dirs = [_normalize_path_str(d) for d in config.get("exclude_dirs", []) if d]
+    try:
+        rel_path = path.relative_to(vault_path)
+    except Exception:
+        return False
+
+    rel_path_str = _normalize_rel_path(path, vault_path)
+
+    if include_files and rel_path_str in include_files:
+        return True
+
+    # Exclude by directory prefix
+    for ex in exclude_dirs:
+        if rel_path_str == ex or rel_path_str.startswith(ex + "/"):
+            return False
+
+    # If include_dirs specified, only allow those top-level dirs
+    if include_dirs:
+        if not rel_path.parts:
+            return False
+        top_dir = _normalize_dir_name(rel_path.parts[0])
+        if top_dir not in include_dirs:
+            return False
+
+    return True
+
+
+def build_exclude_paths(vault_path: Path) -> List[Path]:
+    """Build absolute paths to exclude from indexing."""
+    exclude_paths: List[Path] = []
+    vault_resolved = vault_path.resolve()
+
+    # Exclude MemFlow repo if it lives inside the vault
+    try:
+        memflow_root = MEMFLOW_ROOT.resolve()
+        if memflow_root.is_relative_to(vault_resolved):
+            exclude_paths.append(memflow_root)
+    except Exception:
+        pass
+
+    # Exclude index storage if it lives inside the vault
+    try:
+        index_path = Path(INDEX_STORAGE).resolve()
+        if index_path.is_relative_to(vault_resolved):
+            exclude_paths.append(index_path)
+    except Exception:
+        pass
+
+    return exclude_paths
+
+
+def is_excluded_path(path: Path, vault_path: Path, exclude_paths: Optional[List[Path]] = None) -> bool:
+    """Return True if a path should be excluded from indexing."""
+    if not path:
+        return True
+
+    # Skip hidden/system/tooling directories by name
+    if any(part in EXCLUDED_DIR_NAMES for part in path.parts):
+        return True
+
+    # Skip explicit exclude paths
+    if exclude_paths:
+        for ex in exclude_paths:
+            try:
+                if path.resolve().is_relative_to(ex):
+                    return True
+            except Exception:
+                if str(path.resolve()).startswith(str(ex)):
+                    return True
+
+    # Only index files inside the vault
+    try:
+        if not path.resolve().is_relative_to(vault_path.resolve()):
+            return True
+    except Exception:
+        if not str(path.resolve()).startswith(str(vault_path.resolve())):
+            return True
+
+    return False
 
 
 def extract_wikilinks(content: str) -> List[str]:
@@ -78,6 +248,9 @@ def load_documents_with_metadata() -> List[Document]:
     """Load all markdown documents from vault with custom metadata extraction."""
     documents = []
     vault_path = Path(VAULT_PATH)
+    exclude_paths = build_exclude_paths(vault_path)
+    excluded_count = 0
+    config = get_memflow_config()
 
     if not vault_path.exists():
         raise FileNotFoundError(f"Vault path does not exist: {VAULT_PATH}")
@@ -86,6 +259,12 @@ def load_documents_with_metadata() -> List[Document]:
     logger.info(f"Found {len(md_files)} markdown files in vault")
 
     for filepath in md_files:
+        if is_excluded_path(filepath, vault_path, exclude_paths):
+            excluded_count += 1
+            continue
+        if not is_included_path(filepath, vault_path, config):
+            excluded_count += 1
+            continue
         try:
             content = filepath.read_text(encoding='utf-8')
             metadata = extract_metadata(filepath, content)
@@ -116,6 +295,7 @@ def load_documents_with_metadata() -> List[Document]:
         doc.metadata["backlink_count"] = len(backlink_map.get(file_name_no_ext, []))
         doc.metadata["backlinks"] = backlink_map.get(file_name_no_ext, [])
 
+    logger.info(f"Excluded {excluded_count} markdown files from indexing")
     return documents
 
 
@@ -219,9 +399,18 @@ def update_documents(filepaths: List[str], index: VectorStoreIndex) -> VectorSto
         Updated index
     """
     vault_path = Path(VAULT_PATH)
+    exclude_paths = build_exclude_paths(vault_path)
+    config = get_memflow_config()
 
     for filepath_str in filepaths:
         filepath = Path(filepath_str)
+
+        if is_excluded_path(filepath, vault_path, exclude_paths):
+            logger.debug(f"Skipping excluded path: {filepath}")
+            continue
+        if not is_included_path(filepath, vault_path, config):
+            logger.debug(f"Skipping non-included path: {filepath}")
+            continue
 
         if not filepath.exists():
             # File was deleted - remove from index
